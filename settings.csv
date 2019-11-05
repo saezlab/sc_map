@@ -1,0 +1,13 @@
+specScore,pearson,25
+specScore,pearson,50
+specScore,pearson,100
+specScore,pearson,1000
+specScore,spearman,25
+specScore,spearman,50
+specScore,spearman,100
+specScore,spearman,1000
+dge,nes,25
+dge,nes,50
+dge,nes,100
+dge,nes,1000
+centroid,scmap,NA
