@@ -31,9 +31,9 @@ suppressPackageStartupMessages(require(scmap))
 ### Get parameters #####
 #--- Input variables
 option_list = list(
-  make_option(c("--S1"), action="store", default="./data/panc8/fluidigmc1.rds", type='character',
+  make_option(c("--S1"), action="store", default="./data/ifnb/STIM.rds", type='character',
               help="Path to SeuratObject from Sample #1"),
-  make_option(c("--S2"), action="store", default="./data/panc8/smartseq2.rds", type='character',
+  make_option(c("--S2"), action="store", default="./data/ifnb/CTRL.rds", type='character',
               help="Path to SeuratObject from Sample #2"),
   make_option(c("--METHOD"), action="store", default="pearson", type='character',
               help="Mapping method: pearson, spearman, nes, scmap-cell"),
@@ -60,6 +60,11 @@ for(user_input in names(opt)) {
   assign(user_input,opt[[user_input]])
 }
 
+# Fix "NA" to NA
+if(!is.numeric(N)) {
+  if(N=="NA") N <- NA; 
+}
+
 # Create directory if does not exist
 if(!dir.exists(OUTDIR)) dir.create(OUTDIR)
 
@@ -81,7 +86,7 @@ if(is.na(RENAME)) RENAME <- c(Project(S1),Project(S2));
 # Remove cell population with only N cell
 consistent_cellpop <- function(S,min.cell=3) {
   valid_gr <- function(S, min.cells=3) {
-    cnt <- table(S$celltype)
+    cnt <- table(S$seurat_clusters)
     celltype <- names(cnt)[cnt> min.cells]
     return(celltype)
   }
@@ -249,24 +254,24 @@ seurat2scmap <- function(S) {
 res <- sc_dist(S1,S2,method=METHOD, metric=METRIC,Nfeatures = N, cores=TSK)
 
 ## Save simil matrix
-write.table(res,file = paste0(OUTDIR,"/","res_",paste(RENAME,collapse = "-"),"_",METHOD,"_",METRIC,"_N",N,".png"),
+write.table(res,file = paste0(OUTDIR,"/","res_",paste(RENAME,collapse = "-"),"_",METHOD,"_",METRIC,"_",N,".tsv"),
             sep="\t", quote = FALSE, row.names = TRUE, col.names = NA)
 
 ## Visual plot
 # Heatmap
-png(paste0(OUTDIR,"/","heatmap_",paste(RENAME,collapse = "-"),"_",METHOD,"_",METRIC,"_N",N,".png"),
+png(paste0(OUTDIR,"/","heatmap_",paste(RENAME,collapse = "-"),"_",METHOD,"_",METRIC,"_",N,".png"),
     height = 800*3, width = 800*3, res=280)
 print(dist_vis(res, METHOD, tls = RENAME, wh="heatmap"))
 dev.off()
 
 # Graph
-png(paste0(OUTDIR,"/","graph_",paste(RENAME,collapse = "-"),"_",METHOD,"_",METRIC,"_N",N,".png"),
-    height = 800*3, width = 800*3, res=280)
-print(dist_vis(res, METHOD, tls = RENAME, wh="heatmap"))
-dev.off()
+#png(paste0(OUTDIR,"/","graph_",paste(RENAME,collapse = "-"),"_",METHOD,"_",METRIC,"_",N,".png"),
+#    height = 800*3, width = 800*3, res=280)
+#print(dist_vis(res, METHOD, tls = RENAME, wh="heatmap"))
+#dev.off()
 
 ### Log run ####
-sink(file = paste0(OUTDIR,"/","sessionInfo_",paste(RENAME,collapse = "-"),"_",METHOD,"_",METRIC,"_N",N,".txt"))
+sink(file = paste0(OUTDIR,"/","sessionInfo_",paste(RENAME,collapse = "-"),"_",METHOD,"_",METRIC,"_",N,".txt"))
 ## Parameters used
 cat("[INFO] Input parameters\n", file=stdout())
 for(user_input in names(opt)) {

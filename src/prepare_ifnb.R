@@ -1,4 +1,7 @@
-### TITLE - 
+### TITLE : Prepare toy dataset from stimulated T-cells
+### AUTHOR : Javier Perales-Patón - javier.perales@bioquant.uni-heidelberg.de
+### LICENSE : GPL-v3
+
 library(Seurat)
 library(SeuratData)
 library(cowplot)
@@ -44,5 +47,6 @@ dir.create(dirout,recursive = TRUE)
 idata <- SplitObject(immune.combined, split.by = "stim")
 for(proj in names(idata)) {
   Project(idata[[proj]]) <- proj
+  idata[[proj]]$seurat_clusters <- Idents(idata[[proj]])
   saveRDS(idata[[proj]], file=paste0(dirout,"", proj, ".rds"))
 }
