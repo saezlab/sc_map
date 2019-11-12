@@ -11,3 +11,7 @@ dge,nes,50
 dge,nes,100
 dge,nes,1000
 centroid,scmap-cell,NA
+pred,transfer,500
+pred,transfer,1000
+pred,transfer,1500
+pred,transfer,2000

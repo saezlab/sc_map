@@ -8,11 +8,13 @@
 ###   - Metrics: within-sample measurement of (dis-)similarities:
 ###         * specScore : specicity scores by genesorteR - see ?sortGenes for more info.
 ###         * dge : ranking of differentially expresed genes by -log10(pval) * sign(log2FC) from wilcox test.
+###         * pop : proportion of cells within cluster that are mapped onto the external clusters.
 ###   - Methods : between-sample approach to calculate cluster (dis-)similarity
 ###         * nes : normalized enrichment score from a pre-ranked Gene Set Enrichment Score
 ###         * pearson : pearson correlation
 ###         * spearman : spearman correlation
 ###         * scmap-cell : centroid projection of one sample into individuals cells from a second sample
+###         * transfer : transfer labeling using Cannonical Correlation Analysis by Seurat
 ### LICENSE : GPL-v3
 
 ### Requirements
@@ -31,15 +33,15 @@ suppressPackageStartupMessages(require(scmap))
 ### Get parameters #####
 #--- Input variables
 option_list = list(
-  make_option(c("--S1"), action="store", default="./data/ifnb/STIM.rds", type='character',
+  make_option(c("--S1"), action="store", default="./data/panc8/fluidigmc1.rds", type='character',
               help="Path to SeuratObject from Sample #1"),
-  make_option(c("--S2"), action="store", default="./data/ifnb/CTRL.rds", type='character',
+  make_option(c("--S2"), action="store", default="./data/panc8/smartseq2.rds", type='character',
               help="Path to SeuratObject from Sample #2"),
-  make_option(c("--METHOD"), action="store", default="pearson", type='character',
-              help="Mapping method: pearson, spearman, nes, scmap-cell"),
-  make_option(c("--METRIC"), action="store", default="specScore", type='character',
+  make_option(c("--METHOD"), action="store", default="transfer", type='character',
+              help="Mapping method: pearson, spearman, nes, scmap-cell, transfer"),
+  make_option(c("--METRIC"), action="store", default="pred", type='character',
               help="Mapping metric: specScore, dge, centroid"),
-  make_option(c("--N"), action="store", default=NA, type='numeric',
+  make_option(c("--N"), action="store", default=2000, type='numeric',
               help="Number of features (#genes) for mapping."),
   make_option(c("--RENAME"), action="store", default=NA, type='character',
               help="Rename samples."),
@@ -81,7 +83,37 @@ for(Sx in ls(pattern = "S(1|2)")) {
 if(is.na(RENAME)) RENAME <- c(Project(S1),Project(S2));
 
 
-### Functions by Mapping method ######
+### FUNCTIONS ######
+
+# Select features
+sel_features <- function(S, approach="vst", N=2000) {
+  
+  if(approach=="vst") {
+    S <- NormalizeData(object = S, verbose = FALSE)
+    S <- FindVariableFeatures(object = S, selection.method = "vst", nfeatures = N, verbose = FALSE)
+    sel <- VariableFeatures(S)
+  }
+  
+  return(sel)
+}
+
+get_anchored_preds <-function(Squery, Sref, Sref.features) {
+  Ndims <- 30
+  # if(length(Sref@reductions)>0) {
+  #   if("pca" %in% names(Sref@reductions) ) {
+  #     Ndims <- length(Sref@reductions$pca)
+  #   }
+  # }
+
+  Squery.anchors <- FindTransferAnchors(reference = Sref, query=Squery, features = Sref.features, dims=1:Ndims)
+  Squery.predictions <- TransferData(anchorset = Squery.anchors, refdata = Sref$seurat_clusters, 
+                              dims = 1:Ndims)
+  Squery.predids <- setNames(Squery.predictions$predicted.id, rownames(Squery.predictions)) 
+  
+  stopifnot(all(colnames(Squery) == names(Squery.predids)))
+  return(Squery.predids)
+}
+
 
 # Remove cell population with only N cell
 consistent_cellpop <- function(S,min.cell=3) {
@@ -145,6 +177,16 @@ calc_dge <- function(S, cores=1, prior.count=0.001) {
   return(rnk)
 }
 
+calc_prop <- function(S, cell_class) {
+  S_cmat <- table(S$seurat_clusters,cell_class)
+  S_totalclass <- table(S1$seurat_clusters)
+  res <- sweep(S_cmat, 1, S_totalclass, "/")
+  
+  if(is(res)[1]=="table") attributes(res)$class <- "matrix";
+  
+  return(res)
+}
+
 ### METHODS #####
 # Calculate NES
 calc_nes <- function(rnk,gs.list) {
@@ -153,12 +195,6 @@ calc_nes <- function(rnk,gs.list) {
     nes <- setNames(res$NES,res$pathway)
   })
   return(nes)
-}
-
-# Within-cluster proportion of cells projected based on centroids
-# aka. scmapCell
-calc_projcentr <- function() {
-  
 }
 
 # Estimate distance
@@ -174,14 +210,20 @@ sc_dist <- function(S1, S2, method=c("pearson"), metric="specScore", Nfeatures=2
   
   genes <- NULL
   if(!is.na(Nfeatures)) {
-    feat1 <- rownames(M1)[rowSums(apply(-M1,2,rank) <= Nfeatures) > 0]
-    feat2 <- rownames(M2)[rowSums(apply(-M2,2,rank) <= Nfeatures) > 0]
-    genes <- unique(c(intersect(feat1,rownames(M2)), intersect(feat2, rownames(M1))))
+    if(method %in% c("pearson","spearman")) {
+      feat1 <- rownames(M1)[rowSums(apply(-M1,2,rank) <= Nfeatures) > 0]
+      feat2 <- rownames(M2)[rowSums(apply(-M2,2,rank) <= Nfeatures) > 0]
+      genes <- unique(c(intersect(feat1,rownames(M2)), intersect(feat2, rownames(M1))))
+    } else if (method=="transfer") {
+      genes <- sel_features(S2, N=Nfeatures)
+    }
+    
   }
   if(is.null(genes)) genes <- intersect(rownames(S1),rownames(S2))
   
   if (method %in% c("pearson","spearman")) {
     res <- cor(M1[genes,],M2[genes,], method = method)
+    res <- res[sort(rownames(res)), sort(colnames(res))]
   } else if (method=="nes") {
     GS1 <- sapply(colnames(M1), function(z) names(sort(M1[,z],decreasing = TRUE))[1:Nfeatures], simplify = FALSE)
     GS2 <- sapply(colnames(M2), function(z) names(sort(M2[,z],decreasing = TRUE))[1:Nfeatures], simplify = FALSE)
@@ -214,6 +256,9 @@ sc_dist <- function(S1, S2, method=c("pearson"), metric="specScore", Nfeatures=2
     # Calculate the proportion of cells that were classified as S2 cell type
     res <- table(SC1$seurat_clusters,scmapCell_clusters$scmap_cluster_labs)*100 / ncol(SC1)
     attributes(res)$class <- "matrix"
+  } else if (method=="transfer") {
+    S1_preds <- get_anchored_preds(Squery = S1, Sref = S2, Sref.features = genes)
+    res <- calc_prop(S = S1, cell_class = S1_preds)
   }
   
   return(res)
@@ -222,8 +267,15 @@ sc_dist <- function(S1, S2, method=c("pearson"), metric="specScore", Nfeatures=2
 
 # Dist matrix visualization
 dist_vis <- function(mat, Stat="Stat", tls=c("S1","S2"), wh="heatmap") {
+  if(Stat %in% c("pearson","spearman")) {
+    color_fun <- circlize::colorRamp2(c(-1,0,+1), c("blue","white","red"))
+  } else if(Stat %in% c("transfer","scmap-cell")) {
+    Stat <- "Prop"
+    color_fun <- circlize::colorRamp2(c(0,+1), c("blue","red"))
+  }
   if(wh=="heatmap") {
     Heatmap(mat, name=Stat,
+            col=color_fun,
             row_title = tls[1],row_title_gp = gpar(fontsize=32),
             column_title = tls[2], column_title_gp = gpar(fontsize=32),
             row_names_side = "left", row_names_gp = gpar(fontsize=26),
@@ -260,8 +312,10 @@ write.table(res,file = paste0(OUTDIR,"/","res_",paste(RENAME,collapse = "-"),"_"
 ## Visual plot
 # Heatmap
 png(paste0(OUTDIR,"/","heatmap_",paste(RENAME,collapse = "-"),"_",METHOD,"_",METRIC,"_",N,".png"),
-    height = 800*3, width = 800*3, res=280)
-print(dist_vis(res, METHOD, tls = RENAME, wh="heatmap"))
+    height = 800*3, width = 1200*3, res=280)
+print(draw(dist_vis(res, METHOD, tls = RENAME, wh="heatmap"),
+           column_title=paste0(METHOD,"_",METRIC,"_",N), column_title_gp=gpar(fontsize=44,fontface="bold"))
+)
 dev.off()
 
 # Graph
