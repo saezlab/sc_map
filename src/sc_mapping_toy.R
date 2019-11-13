@@ -1,10 +1,14 @@
 ### TITLE : [TOY script] Mapping cell subpopulations between 2 single-cell samples
 ### AUTHOR : Javier Perales-Paton, javier.perales@bioquant.uni-heidelberg.de
-### LICENSE : GPL-v3
+### DESCRIPTION : It takes two samples (S1 and S2, Seurat Objects), and uses S2 
+###   as a reference to transfer labels to S1. Finally, it measures the proportion 
+###   of cells from a particular S1 cell subpopulation labelled as another from S2.
+###   Useful to characterize unknown cell clusters using another ref sample (S2).
 ### MANIFEST #### 
-# Minimal script of'https://github.com/saezlab/sc_map/blob/master/src/sc_mapping.R',
-#   incl. only one module for one of the methods available.
+# Minimal version of'https://github.com/saezlab/sc_map/blob/master/src/sc_mapping.R',
+#   incl. only one module for one of the mapping methods available (fastest/best).
 # Input data: run 'https://github.com/saezlab/sc_map/blob/master/src/prepare_panc8.R'
+### LICENSE : GPL-v3
 
 ### Load libraries #####
 suppressPackageStartupMessages(require(Seurat))
@@ -13,7 +17,7 @@ suppressPackageStartupMessages(require(ComplexHeatmap))
 ### Input parameters #####
 S1 <- "./data/panc8/fluidigmc1.rds"
 S2 <- "./data/panc8/smartseq2.rds"
-N <- 2000
+N <- 2000 # Number or NA value
 OUTDIR <- "./results/panc8"
 # Create directory if does not exist
 if(!dir.exists(OUTDIR)) dir.create(OUTDIR, recursive = TRUE)
@@ -32,7 +36,6 @@ sel_features <- function(S, N=2000) {
   S <- NormalizeData(object = S, verbose = FALSE)
   S <- FindVariableFeatures(object = S, selection.method = "vst", nfeatures = N)
   sel <- VariableFeatures(S)
-  
   return(sel)
 }
 
@@ -42,9 +45,23 @@ get_anchored_preds <-function(Squery, Sref, Sref.features) {
   Squery.preds <- TransferData(anchorset = Squery.anchors,
                                refdata = Sref$seurat_clusters, dims = 1:30)
   Squery.predids <- setNames(Squery.preds$predicted.id, rownames(Squery.preds)) 
-  
   stopifnot(all(colnames(Squery) == names(Squery.predids)))
   return(Squery.predids)
+}
+
+# Dist matrix visualization
+dist_vis <- function(mat, Stat="Prop cells", tls=c("S1","S2")) {
+  color_fun <- circlize::colorRamp2(c(0,+1), c("white","red"))
+  Heatmap(mat, name=Stat,
+          col=color_fun,
+          row_title = tls[1],row_title_gp = gpar(fontsize=32),
+          column_title = tls[2], column_title_gp = gpar(fontsize=32),
+          row_names_side = "left", row_names_gp = gpar(fontsize=26),
+          column_names_side = "top", column_names_gp = gpar(fontsize=26),
+          heatmap_legend_param= list(legend_height = unit(4, "cm"),
+                                     title_gp=gpar(fontsize=16),
+                                     labels_gp = gpar(fontsize = 15)),
+          column_names_rot = 90, cluster_columns = FALSE, cluster_rows = FALSE) 
 }
 
 ### METRICS ####
@@ -68,27 +85,11 @@ sc_dist <- function(S1, S2, Nfeatures=25, cores=1) {
   } else { # All genes
     genes <- intersect(rownames(S1),rownames(S2))
   }
-  
   # Transfer labels
   S1_preds <- get_anchored_preds(Squery = S1, Sref = S2, Sref.features = genes)
   res <- calc_prop(S = S1, cell_class = S1_preds)
   
   return(res)
-}
-
-# Dist matrix visualization
-dist_vis <- function(mat, Stat="Prop cells", tls=c("S1","S2")) {
-    color_fun <- circlize::colorRamp2(c(0,+1), c("white","red"))
-    Heatmap(mat, name=Stat,
-            col=color_fun,
-            row_title = tls[1],row_title_gp = gpar(fontsize=32),
-            column_title = tls[2], column_title_gp = gpar(fontsize=32),
-            row_names_side = "left", row_names_gp = gpar(fontsize=26),
-            column_names_side = "top", column_names_gp = gpar(fontsize=26),
-            heatmap_legend_param= list(legend_height = unit(4, "cm"),
-                                       title_gp=gpar(fontsize=16),
-                                       labels_gp = gpar(fontsize = 15)),
-          column_names_rot = 90, cluster_columns = FALSE, cluster_rows = FALSE) 
 }
 
 ### MAIN #####
